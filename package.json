@@ -1,0 +1,16 @@
+{
+  "name": "blood_bank",
+  "version": "1.0.0",
+  "description": "A Backend for Blood Bank Management",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "Javascript",
+    "backend",
+    "Kavi"
+  ],
+  "author": "Kavi Raikwal",
+  "license": "ISC"
+}
