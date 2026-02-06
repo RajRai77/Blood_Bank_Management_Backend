@@ -4,27 +4,36 @@ import { Inventory } from "../models/inventory.model.js";
 import { Donor } from "../models/donor.model.js"; // We need this to link donor
 import { ApiResponse } from "../utils/ApiResponse.js";
 
-// 1. ADD NEW BLOOD BAG (When a Donor donates)
-const addInventory = asyncHandler(async (req, res) => {
-    const { email, bloodGroup, quantity, location } = req.body;
 
-    // A. Verify Donor Exists
-    const donor = await Donor.findOne({ email });
-    if (!donor) {
-        throw new ApiError(404, "Donor not found. Please register donor first.");
+// 1. ADD NEW BLOOD BAG (Updated: Uses Donor ID)
+const addInventory = asyncHandler(async (req, res) => {
+    // We now expect 'donorId' from the frontend
+    const { donorId, bloodGroup, quantity, location } = req.body;
+
+    // A. Verify Donor Exists using unique ID
+    if (!donorId) {
+        throw new ApiError(400, "Donor ID is required");
     }
 
-    // B. Generate a Random Unit ID (e.g., #88291) to mimic the UI
+    const donor = await Donor.findOne({ donorId });
+    
+    if (!donor) {
+        throw new ApiError(404, `Donor with ID ${donorId} not found.`);
+    }
+
+    // B. Generate Unit ID for the BAG (e.g., #88291)
     const unitId = "#" + Math.floor(10000 + Math.random() * 90000).toString();
 
-    // C. Create the Inventory Record
+    // C. Create Inventory
     const bloodBag = await Inventory.create({
         unitId,
-        bloodGroup, // e.g., "A+"
-        quantity: 1, // Standard unit
+        bloodGroup: bloodGroup || donor.bloodGroup,
+        quantity: quantity || 1,
         location: location || "Main Storage",
-        expiryDate: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000), // Expires in 42 days
+        expiryDate: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000), 
         donor: donor._id,
+        organization: req.user._id, 
+        inventoryType: "in",
         status: "available"
     });
 
