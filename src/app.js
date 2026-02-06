@@ -13,4 +13,11 @@ app.use(express.urlencoded({extended:true,limit:"16kb"}))
 app.use(express.static("public"))
 app.use(cookieParser())
 
+import userRouter from './routes/user.routes.js' // 
+import inventoryRouter from './routes/inventory.routes.js' 
+
+// ROUTES DECLARATION
+app.use("/api/v1/users", userRouter) 
+app.use("/api/v1/inventory", inventoryRouter) 
+
 export {app}
