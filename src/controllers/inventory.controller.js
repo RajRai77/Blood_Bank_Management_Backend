@@ -74,4 +74,22 @@ const getRecentInventory = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, recent, "Recent Activity Fetched"));
 });
 
+export const getCertificate = asyncHandler(async (req, res) => {
+    const { donorId } = req.params;
+    
+    // Find donor using the custom ID (e.g., DNR-1001)
+    const donor = await Donor.findOne({ donorId });
+    if (!donor) throw new ApiError(404, "Donor not found");
+
+    const certificate = {
+        certId: `CERT-${Date.now()}`,
+        donorName: `${donor.firstName} ${donor.lastName}`,
+        bloodGroup: donor.bloodGroup,
+        date: new Date().toLocaleDateString(),
+        message: "Thank you for being a hero!"
+    };
+
+    return res.status(200).json(new ApiResponse(200, certificate, "Certificate Generated"));
+});
+
 export { addInventory, getInventoryStats, getRecentInventory };
