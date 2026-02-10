@@ -4,7 +4,7 @@ import cors from "cors"
 
 const app = express()
 app.use(cors({
-    origin : process.env.CORS_ORIGIN,
+    origin: "http://localhost:5173",
     credentials: true
 }))
 
@@ -19,6 +19,7 @@ import requestRouter from './routes/request.routes.js'
 import deliveryRouter from './routes/delivery.routes.js';
 import labRouter from './routes/lab.routes.js';
 import campRouter from './routes/camp.routes.js';
+import donorRouter from "./routes/donor.routes.js";
 
 // ROUTES DECLARATION
 app.use("/api/v1/users", userRouter) 
@@ -27,5 +28,6 @@ app.use("/api/v1/requests", requestRouter)
 app.use("/api/v1/delivery", deliveryRouter);
 app.use("/api/v1/lab", labRouter);   
 app.use("/api/v1/camps", campRouter);
+app.use("/api/v1/donors", donorRouter);
 
 export {app}

@@ -1,17 +1,14 @@
 import { Router } from "express";
+import { createRequest, getRequests, updateRequestStatus } from "../controllers/request.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
-import { 
-    createBloodRequest, 
-    getAllRequests, 
-    updateRequestStatus 
-} from "../controllers/request.controller.js";
 
 const router = Router();
+router.use(verifyJWT);
 
-router.use(verifyJWT); // Protect all routes
+router.route("/")
+    .get(getRequests)      // View All
+    .post(createRequest);  // Create New
 
-router.route("/create").post(createBloodRequest); // Hospital creates
-router.route("/").get(getAllRequests);            // Admin sees all, Hospital sees theirs
-router.route("/:requestId/status").put(updateRequestStatus); // Admin approves
+router.route("/:id/status").put(updateRequestStatus); // Approve/Reject
 
 export default router;

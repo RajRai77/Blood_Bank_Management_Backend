@@ -1,94 +1,93 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { BloodRequest } from "../models/request.model.js";
-import { Inventory } from "../models/inventory.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
+import { Request } from "../models/request.model.js";
+import { Inventory } from "../models/inventory.model.js";
 
-// 1. CREATE REQUEST (Hospital asking for blood)
-const createBloodRequest = asyncHandler(async (req, res) => {
-    const { bloodGroup, unitsRequired, urgency, reason, patientName } = req.body;
+const createRequest = asyncHandler(async (req, res) => {
+    const { recipientId, requesterName, patientName, bloodGroup, requestType, quantity, priority } = req.body;
 
-    if (!bloodGroup || !unitsRequired) {
-        throw new ApiError(400, "Blood Group and Units Required are mandatory");
-    }
+    let validRequesterType = "Individual";
+    if (req.user.role === "hospital" || req.user.role === "admin") validRequesterType = "Hospital";
+    else if (req.user.role === "organization") validRequesterType = "Clinic";
 
-    const request = await BloodRequest.create({
-        hospital: req.user._id, // From verifyJWT
-        bloodGroup,
-        unitsRequired,
-        urgency,
-        reason,
-        patientName,
-        status: "Pending"
+    const request = await Request.create({
+        requesterId: req.user._id, // <--- SAVE SENDER ID
+        requesterName, 
+        requesterType: validRequesterType,
+        patientName, 
+        bloodGroup, 
+        requestType, 
+        quantity, 
+        priority,
+        // The recipient (Organization)
+        organization: recipientId || req.user._id 
     });
 
-    return res
-        .status(201)
-        .json(new ApiResponse(201, request, "Blood Request Submitted Successfully"));
+    return res.status(201).json(new ApiResponse(201, request, "Blood Request Created"));
 });
 
-// 2. GET ALL REQUESTS (For Admin Dashboard)
-const getAllRequests = asyncHandler(async (req, res) => {
-    // Admins see ALL, Hospitals see only THEIRS
-    const filter = req.user.role === "admin" ? {} : { hospital: req.user._id };
+// 2. Get All Requests (For Admin Dashboard)
+const getRequests = asyncHandler(async (req, res) => {
+    const { status } = req.query;
+    let query = {}; 
 
-    const requests = await BloodRequest.find(filter)
-        .populate("hospital", "name email phone hospitalName") // Show who asked
+    if (status && status !== "All") query.status = status;
+
+    // CRITICAL FIX:
+    // Show request if I am the Recipient (organization) OR the Sender (requesterId)
+    // Admin sees everything.
+    if (req.user.role !== "admin") {
+        query.$or = [
+            { organization: req.user._id }, // Incoming
+            { requesterId: req.user._id }   // Outgoing
+        ];
+    }
+
+    const requests = await Request.find(query)
+        .populate("organization", "name email phone address") // Who received it
+        .populate("requesterId", "name email phone address")  // Who sent it
         .sort({ createdAt: -1 });
 
-    return res
-        .status(200)
-        .json(new ApiResponse(200, requests, "Requests Fetched Successfully"));
+    return res.status(200).json(new ApiResponse(200, requests, "Requests Fetched"));
 });
-
-// 3. UPDATE STATUS (The "Smart" Approval)
+// 3. UPDATE STATUS (Approve/Reject)
 const updateRequestStatus = asyncHandler(async (req, res) => {
-    const { requestId } = req.params;
-    const { status } = req.body; // "Approved", "Rejected", "Fulfilled"
+    const { id } = req.params;
+    const { status, deliveryDetails } = req.body; // Expect delivery info on approval
 
-    // Only Admin can approve
-    if (req.user.role !== "admin") {
-        throw new ApiError(403, "Only Admins can process requests");
-    }
+    const request = await Request.findById(id);
+    if (!request) throw new ApiError(404, "Request not found");
 
-    const request = await BloodRequest.findById(requestId);
-    if (!request) {
-        throw new ApiError(404, "Request not found");
-    }
-
-    // IF APPROVING: Check Stock & Reserve Units
-    if (status === "Approved" && request.status !== "Approved") {
-        // A. Count available units
-        const availableUnits = await Inventory.find({
+    // Stock deduction logic (Only if approving)
+    if (status === "approved") {
+        const availableStock = await Inventory.find({
             bloodGroup: request.bloodGroup,
-            status: "available"
-        }).limit(request.unitsRequired);
+            inventoryType: request.requestType,
+            status: "available",
+            isTested: true
+        }).limit(request.quantity);
 
-        // B. Check if enough stock
-        if (availableUnits.length < request.unitsRequired) {
-            throw new ApiError(400, `Insufficient Stock! Only ${availableUnits.length} units of ${request.bloodGroup} available.`);
+        if (availableStock.length < request.quantity) {
+            throw new ApiError(400, "Insufficient Stock");
         }
-
-        // C. "Reserve" the units (Update Inventory)
-        const unitIds = availableUnits.map(unit => unit._id);
-        await Inventory.updateMany(
-            { _id: { $in: unitIds } },
-            { 
-                $set: { 
-                    status: "reserved", 
-                    hospital: request.hospital // Link to hospital
-                } 
-            }
-        );
+        
+        // Deduct Stock
+        const unitIds = availableStock.map(u => u._id);
+        await Inventory.updateMany({ _id: { $in: unitIds } }, { $set: { status: "out" } });
+        
+        // Save Delivery Details
+        if(deliveryDetails) {
+            request.deliveryDetails = {
+                ...deliveryDetails,
+                startedAt: new Date()
+            };
+        }
     }
 
-    // Update Request Status
     request.status = status;
     await request.save();
 
-    return res
-        .status(200)
-        .json(new ApiResponse(200, request, `Request ${status} Successfully`));
+    return res.status(200).json(new ApiResponse(200, request, `Request ${status}`));
 });
-
-export { createBloodRequest, getAllRequests, updateRequestStatus };
+export { createRequest, getRequests, updateRequestStatus };

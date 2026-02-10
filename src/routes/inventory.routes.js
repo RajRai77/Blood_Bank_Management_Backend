@@ -8,6 +8,8 @@ const router = Router();
 router.use(verifyJWT);
 
 // Routes
+router.route("/").get(getRecentInventory); // Handles /inventory?isTested=false
+
 router.route("/add").post(addInventory);       // Add blood
 router.route("/stats").get(getInventoryStats); // For Dashboard Cards
 router.route("/recent").get(getRecentInventory); // For Activity Log

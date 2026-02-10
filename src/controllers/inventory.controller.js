@@ -5,41 +5,39 @@ import { Donor } from "../models/donor.model.js"; // We need this to link donor
 import { ApiResponse } from "../utils/ApiResponse.js";
 
 
-// 1. ADD NEW BLOOD BAG (Updated: Uses Donor ID)
-const addInventory = asyncHandler(async (req, res) => {
-    // We now expect 'donorId' from the frontend
-    const { donorId, bloodGroup, quantity, location } = req.body;
 
-    // A. Verify Donor Exists using unique ID
-    if (!donorId) {
-        throw new ApiError(400, "Donor ID is required");
-    }
+// 1. ADD NEW BLOOD BAG (Corrected for New Schema)
+const addInventory = asyncHandler(async (req, res) => {
+    // 1. Accept 'volume' from the frontend
+    const { donorId, bloodGroup, quantity, location, volume } = req.body; 
+
+    if (!donorId) throw new ApiError(400, "Donor ID is required");
 
     const donor = await Donor.findOne({ donorId });
-    
-    if (!donor) {
-        throw new ApiError(404, `Donor with ID ${donorId} not found.`);
-    }
+    if (!donor) throw new ApiError(404, `Donor ${donorId} not found.`);
 
-    // B. Generate Unit ID for the BAG (e.g., #88291)
     const unitId = "#" + Math.floor(10000 + Math.random() * 90000).toString();
 
-    // C. Create Inventory
     const bloodBag = await Inventory.create({
         unitId,
         bloodGroup: bloodGroup || donor.bloodGroup,
         quantity: quantity || 1,
         location: location || "Main Storage",
-        expiryDate: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000), 
+        expiryDate: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000),
         donor: donor._id,
-        organization: req.user._id, 
-        inventoryType: "in",
+        organization: req.user._id,
+        inventoryType: "Whole Blood",
+        
+        // --- NEW FIELD ---
+        // If user doesn't type it, default to standard 450ml
+        volume: volume || 450, 
+        
+        isTested: false,
+        testResult: "Pending",
         status: "available"
     });
 
-    return res
-        .status(201)
-        .json(new ApiResponse(201, bloodBag, "New Blood Unit Added Successfully"));
+    return res.status(201).json(new ApiResponse(201, bloodBag, "New Blood Unit Added"));
 });
 
 // 2. GET DASHBOARD STATS (The "Wow" Factor)
@@ -64,14 +62,30 @@ const getInventoryStats = asyncHandler(async (req, res) => {
 
 // 3. GET RECENT ACTIVITY (For the Sidebar)
 const getRecentInventory = asyncHandler(async (req, res) => {
-    const recent = await Inventory.find()
-        .sort({ createdAt: -1 }) // Newest first
-        .limit(5)
-        .populate("donor", "firstName lastName"); // Show Donor Name
+    // 1. Extract all possible filters from URL
+    const { bloodGroup, inventoryType, status, isTested } = req.query;
+
+    // 2. Build Query Object
+    let query = {};
+
+    if (bloodGroup && bloodGroup !== "All") query.bloodGroup = bloodGroup;
+    if (inventoryType && inventoryType !== "All") query.inventoryType = inventoryType;
+    if (status && status !== "All") query.status = status;
+
+    // --- NEW: Handle Boolean Filter for Lab ---
+    if (isTested !== undefined) {
+        // Convert string "false"/"true" to actual boolean
+        query.isTested = isTested === "true";
+    }
+
+    // 3. Run Query
+    const inventory = await Inventory.find(query)
+        .populate("donor", "firstName lastName donorId")
+        .sort({ createdAt: -1 });
 
     return res
         .status(200)
-        .json(new ApiResponse(200, recent, "Recent Activity Fetched"));
+        .json(new ApiResponse(200, inventory, "Inventory Fetched Successfully"));
 });
 
 export const getCertificate = asyncHandler(async (req, res) => {

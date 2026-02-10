@@ -1,7 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { Delivery } from "../models/delivery.model.js";
-import { BloodRequest } from "../models/request.model.js";
+import { Request } from "../models/request.model.js";
 import { User } from "../models/user.model.js";
 import { Notification } from "../models/notification.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
@@ -11,7 +11,7 @@ const assignDriver = asyncHandler(async (req, res) => {
     const { requestId, driverId, estimatedTime } = req.body;
 
     // A. Check if Request exists and is Approved
-    const request = await BloodRequest.findById(requestId);
+    const request = await Request.findById(requestId);
     if (!request || request.status !== "Approved") {
         throw new ApiError(400, "Request must be 'Approved' before assigning logistics.");
     }
