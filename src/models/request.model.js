@@ -28,14 +28,30 @@ const requestSchema = new Schema({
         default: "pending"
     },
     priority: { type: String, enum: ["Urgent", "Normal"], default: "Normal" },
+
+    // --- NEW: PAYMENT DETAILS ---
+    payment: {
+        amount: { type: Number, required: true }, // The Final Price
+        method: { type: String, enum: ["Online", "COD", "Pending"], default: "Pending" },
+        status: { type: String, enum: ["Pending", "Paid", "Verified"], default: "Pending" },
+        upiId: { type: String }, // The Acceptor's UPI ID
+        transactionId: { type: String }, // The User's Reference ID
+        paymentNote: { type: String }
+    },
     
-    // Delivery Info - NEW FIELDS
     deliveryDetails: {
+        // ... existing fields ...
         driverName: String,
         contactNumber: String,
         vehicleNumber: String,
-        estimatedTime: String,
-        startedAt: Date
+        startedAt: Date,
+        estimatedArrival: Date,
+        notes: String,
+        trackingStarted: { type: Boolean, default: false },
+        
+        // --- NEW FIELDS ---
+        deliveryOTP: String, // The Secret Code
+        completedAt: Date    // When it was delivered
     }
 
 }, { timestamps: true });

@@ -3,41 +3,76 @@ import { ApiError } from "../utils/ApiError.js";
 import { Inventory } from "../models/inventory.model.js";
 import { Donor } from "../models/donor.model.js"; // We need this to link donor
 import { ApiResponse } from "../utils/ApiResponse.js";
+import { User } from "../models/user.model.js";
 
 
 
 // 1. ADD NEW BLOOD BAG (Corrected for New Schema)
 const addInventory = asyncHandler(async (req, res) => {
-    // 1. Accept 'volume' from the frontend
-    const { donorId, bloodGroup, quantity, location, volume } = req.body; 
+    // 1. Accept donorId directly
+    const { bloodGroup, quantity, expiryDate, inventoryType, donorId, email } = req.body;
 
-    if (!donorId) throw new ApiError(400, "Donor ID is required");
+    // 2. Resolve Donor
+    let finalDonorId = donorId;
 
-    const donor = await Donor.findOne({ donorId });
-    if (!donor) throw new ApiError(404, `Donor ${donorId} not found.`);
+    // If ID not sent but Email is, look it up (Backward Compatibility)
+    if (!finalDonorId && email) {
+        const user = await User.findOne({ email });
+        if (user) finalDonorId = user._id;
+    }
 
-    const unitId = "#" + Math.floor(10000 + Math.random() * 90000).toString();
+    if (!finalDonorId) {
+        throw new ApiError(400, "Donor is required (Select from list)");
+    }
 
-    const bloodBag = await Inventory.create({
-        unitId,
-        bloodGroup: bloodGroup || donor.bloodGroup,
-        quantity: quantity || 1,
-        location: location || "Main Storage",
-        expiryDate: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000),
-        donor: donor._id,
+    // 3. Create Inventory Item
+    const inventory = await Inventory.create({
         organization: req.user._id,
-        inventoryType: "Whole Blood",
-        
-        // --- NEW FIELD ---
-        // If user doesn't type it, default to standard 450ml
-        volume: volume || 450, 
-        
-        isTested: false,
-        testResult: "Pending",
+        bloodGroup,
+        quantity,
+        inventoryType,
+        expiryDate,
+        donor: finalDonorId, // Link to User Model
+        unitId: `UNIT-${Date.now()}-${Math.floor(Math.random()*1000)}`, // Auto-generate
         status: "available"
     });
 
-    return res.status(201).json(new ApiResponse(201, bloodBag, "New Blood Unit Added"));
+    return res.status(201).json(new ApiResponse(201, inventory, "Stock Added Successfully"));
+});
+
+// 2. GET INVENTORY (The Missing Main Function)
+const getInventory = asyncHandler(async (req, res) => {
+    // A. Filter by YOUR Organization
+    const filters = { organization: req.user._id };
+
+    // B. Apply URL Filters (e.g., ?bloodGroup=A+)
+    if (req.query.bloodGroup && req.query.bloodGroup !== "All") {
+        filters.bloodGroup = req.query.bloodGroup;
+    }
+    if (req.query.inventoryType && req.query.inventoryType !== "All") {
+        filters.inventoryType = req.query.inventoryType;
+    }
+    if (req.query.status) {
+        filters.status = req.query.status;
+    }
+
+    // C. Fetch Data
+    const inventory = await Inventory.find(filters)
+        .populate("donor", "name email bloodGroup") // Fixed fields
+        .sort({ createdAt: -1 });
+
+    return res.status(200).json(new ApiResponse(200, inventory, "Inventory Fetched"));
+});
+
+const deleteInventoryItem = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    
+    const item = await Inventory.findById(id);
+    if (!item) throw new ApiError(404, "Item not found");
+
+    await Inventory.findByIdAndDelete(id);
+
+    return res.status(200).json(new ApiResponse(200, {}, "Inventory Item Deleted Successfully"));
 });
 
 // 2. GET DASHBOARD STATS (The "Wow" Factor)
@@ -106,4 +141,4 @@ export const getCertificate = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, certificate, "Certificate Generated"));
 });
 
-export { addInventory, getInventoryStats, getRecentInventory };
+export { addInventory, getInventoryStats, getRecentInventory,deleteInventoryItem , getInventory};
