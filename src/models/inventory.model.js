@@ -16,7 +16,7 @@ const inventorySchema = new Schema({
     status: { type: String, enum: ["available", "out", "expired"], default: "available" },
     
     // --- CAMP / DONOR FIELDS ---
-    isTested: { type: Boolean, default: true }, 
+    isTested: { type: Boolean, default: false }, 
     donorName: { type: String }, // Keep for legacy/manual entry
     
     // THE MISSING LINK:
