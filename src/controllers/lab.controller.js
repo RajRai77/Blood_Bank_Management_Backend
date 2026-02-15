@@ -3,72 +3,104 @@ import { ApiError } from "../utils/ApiError.js";
 import { Inventory } from "../models/inventory.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 
-// 1. RECORD TEST RESULTS (TTI Screening)
+// 1. GET UNITS PENDING TTI SCREENING
+// Logic: Fetch only units where isTested is FALSE
+const getUntestedUnits = asyncHandler(async (req, res) => {
+    const units = await Inventory.find({
+        organization: req.user._id,
+        isTested: false, // <--- Only show untested here
+        status: { $ne: "out" } // Don't show discarded ones
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json(new ApiResponse(200, units, "Untested units fetched"));
+});
+
+// 2. GET SAFE UNITS FOR COMPONENT SEPARATION
+// Logic: Fetch Tested + Safe + Whole Blood
+const getSafeUnits = asyncHandler(async (req, res) => {
+    const units = await Inventory.find({
+        organization: req.user._id,
+        isTested: true,          // <--- Must be tested
+        status: "available",     // <--- Must be Safe
+        inventoryType: "Whole Blood" // Only Whole Blood can be separated
+    }).sort({ updatedAt: -1 });
+
+    return res.status(200).json(new ApiResponse(200, units, "Safe units ready for processing"));
+});
+
+// 3. UPDATE TTI RESULTS (The Fix for "Stuck in Tab")
 const updateTestResults = asyncHandler(async (req, res) => {
     const { unitId, hiv, hbv, hcv, malaria, syphilis } = req.body;
 
-    // Check if any test is positive (true = infected)
-    const isUnsafe = hiv || hbv || hcv || malaria || syphilis;
-    const testStatus = isUnsafe ? "Unsafe" : "Safe";
-    const bagStatus = isUnsafe ? "quarantined" : "available";
+    // 1. Check if ANY test is positive (Unsafe)
+    const isUnsafe = [hiv, hbv, hcv, malaria, syphilis].some(test => test === true);
 
-    const bloodBag = await Inventory.findOneAndUpdate(
-        { unitId },
-        { 
-            isTested: true,
-            testResult: testStatus,
-            status: bagStatus
+    // 2. Determine Status
+    // If Unsafe -> Status is "out" (Discarded)
+    // If Safe   -> Status is "available"
+    const newStatus = isUnsafe ? "out" : "available";
+
+    // 3. Update the Inventory
+    const unit = await Inventory.findOneAndUpdate(
+        { unitId: unitId },
+        {
+            $set: {
+                // Save Medical Results
+                "testResults.hiv": hiv,
+                "testResults.hbv": hbv,
+                "testResults.hcv": hcv,
+                "testResults.malaria": malaria,
+                "testResults.syphilis": syphilis,
+                
+                // --- CRITICAL FIXES ---
+                isTested: true,      // <--- Mark as Tested so it leaves Screening Tab
+                status: newStatus,   // <--- Mark as Available (Safe Tab) or Out
+                testedAt: new Date()
+            }
         },
         { new: true }
     );
 
-    if (!bloodBag) throw new ApiError(404, "Blood Bag not found");
+    if (!unit) throw new ApiError(404, "Unit not found");
 
-    return res.status(200).json(new ApiResponse(200, bloodBag, `Lab Results Recorded: Bag is ${testStatus}`));
+    return res.status(200).json(new ApiResponse(200, unit, "Test Results Updated"));
 });
 
-// 2. COMPONENT SEPARATION (The "Centrifuge" Logic)
-const processBloodComponents = asyncHandler(async (req, res) => {
-    const { unitId, components } = req.body; // e.g. ["Packed Red Cells", "Plasma"]
+// 4. PROCESS COMPONENTS (Split Whole Blood)
+const processComponents = asyncHandler(async (req, res) => {
+    const { unitId, components } = req.body; // e.g. ["Plasma", "Packed Red Cells"]
 
-    // A. Verify Source Bag
-    const parentBag = await Inventory.findOne({ unitId });
-    if (!parentBag) throw new ApiError(404, "Source Bag not found");
-    if (!parentBag.isTested || parentBag.testResult !== "Safe") {
-        throw new ApiError(400, "Cannot process untested or unsafe blood");
-    }
+    const originalUnit = await Inventory.findOne({ unitId });
+    if (!originalUnit) throw new ApiError(404, "Original unit not found");
 
-    const newBags = [];
+    const newBags = components.map(type => {
+        // --- THE FIX: Map Frontend Name to Backend Database Name ---
+        let dbType = type;
+        if (type === "Packed Red Cells") dbType = "Red Cells (RBC)";
 
-    // B. Create Components
-    for (const type of components) {
-        // Create Sub-ID: #88291 -> #88291-P (Plasma), #88291-R (RBC)
-        const suffix = type === "Plasma" ? "-P" : "-R";
-        const subId = unitId + suffix;
-
-        const componentBag = await Inventory.create({
-            unitId: subId,
-            bloodGroup: parentBag.bloodGroup,
-            inventoryType: type,
-            quantity: 1,
-            location: parentBag.location, // Same fridge for now
-            expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Reset expiry
-            donor: parentBag.donor,
+        return {
             organization: req.user._id,
-            isTested: true,
-            testResult: "Safe",
-            parentBagId: unitId,
-            status: "available"
-        });
-        newBags.push(componentBag);
-    }
+            bloodGroup: originalUnit.bloodGroup,
+            inventoryType: dbType, // <--- Use the corrected name
+            quantity: 1,
+            status: "available",
+            isTested: true, 
+            donor: originalUnit.donor,
+            expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), 
+            unitId: `${originalUnit.unitId}-${type.substring(0, 3).toUpperCase()}`,
+            // Ensure schema supports 'sourceUnitId' or remove this line if strictly validating
+            // sourceUnitId: originalUnit.unitId 
+        };
+    });
 
-    // C. Mark Parent Bag as Consumed
-    parentBag.status = "processed";
-    parentBag.quantity = 0;
-    await parentBag.save();
+    await Inventory.insertMany(newBags);
 
-    return res.status(201).json(new ApiResponse(201, newBags, "Blood Separated into Components Successfully"));
+    // Mark Original Bag as Empty/Out
+    originalUnit.status = "out";
+    originalUnit.quantity = 0;
+    await originalUnit.save();
+
+    return res.status(200).json(new ApiResponse(200, newBags, "Components Separated Successfully"));
 });
 
-export { updateTestResults, processBloodComponents };
+export { getUntestedUnits, getSafeUnits, updateTestResults, processComponents };

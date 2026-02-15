@@ -34,7 +34,8 @@ const addInventory = asyncHandler(async (req, res) => {
         expiryDate,
         donor: finalDonorId, // Link to User Model
         unitId: `UNIT-${Date.now()}-${Math.floor(Math.random()*1000)}`, // Auto-generate
-        status: "available"
+        status: "available",
+        isTested: false
     });
 
     return res.status(201).json(new ApiResponse(201, inventory, "Stock Added Successfully"));
